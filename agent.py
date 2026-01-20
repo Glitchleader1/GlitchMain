@@ -1,38 +1,29 @@
-import os
-import requests
+name: Glitch Hunter
 
-# 1. Get the Secret
-webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # The "Every 5 Minutes" setting
+  workflow_dispatch:      # The Manual Button
 
-print("--- DIAGNOSTIC START ---")
+jobs:
+  scrape_and_alert:
+    runs-on: ubuntu-latest
 
-# 2. Check if the Secret exists
-if not webhook_url:
-    print("❌ CRITICAL ERROR: The 'DISCORD_WEBHOOK_URL' secret is MISSING or EMPTY.")
-    print("Fix: Go to Settings > Secrets and Variables > Actions and check the name.")
-    exit(1)
-else:
-    print("✅ Secret found (Hidden for security).")
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v3
 
-# 3. Try to send a raw message
-print(f"Attempting to send message to Discord...")
-data = {"content": "🚨 **CONNECTION TEST** 🚨\nIf you see this, the bot is working!"}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-try:
-    response = requests.post(webhook_url, json=data)
-    
-    # 4. Check the result code
-    if response.status_code == 204:
-        print("✅ SUCCESS: Discord accepted the message (204). Check your channel!")
-    elif response.status_code == 401:
-        print("❌ FAILED: 401 Unauthorized. Your Webhook URL is invalid.")
-    elif response.status_code == 404:
-        print("❌ FAILED: 404 Not Found. The Webhook URL does not exist.")
-    else:
-        print(f"❌ FAILED: Error Code {response.status_code}")
-        print(f"Response: {response.text}")
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-except Exception as e:
-    print(f"❌ CRITICAL EXCEPTION: {e}")
-
-print("--- DIAGNOSTIC END ---")
+      - name: Run the scraper script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python agent.py
