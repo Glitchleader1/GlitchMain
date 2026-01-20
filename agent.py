@@ -1,49 +1,67 @@
+import feedparser
 import requests
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-# --- TEST CONFIGURATION ---
-# 1. The Targets: We are looking at specific deal subreddits only.
-# 2. The Query: We are searching for "sale" (which is everywhere) just to prove it works.
-TARGET_URL = "https://www.reddit.com/r/buildapcsales+gamedeals+consoledeals+4kbluray+frugalmalefashion/search.json?q=sale&restrict_sr=on&sort=new&limit=5"
+# --- CONFIGURATION ---
+# Source: Slickdeals Popular Deals (Sorted by Newest)
+RSS_URL = "https://slickdeals.net/newsearch.php?mode=popdeals&searcharea=deals&sort=newest&rss=1"
 
-HEADERS = {"User-Agent": "GlitchHunter/1.0"}
+# Keywords to trigger an alert
+KEYWORDS = ["glitch", "price error", "mistake", "misprice", "steal", "crazy", "free"]
+
+# SET THIS TO TRUE TO TEST THE CONNECTION (Sends top 3 deals instantly)
+# SET TO FALSE TO WAIT FOR REAL GLITCHES
+TEST_MODE = True 
+
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-def send_discord_alert(title, link, subreddit):
+def send_discord_alert(title, link, is_test=False):
     if not WEBHOOK_URL:
         return
     
+    alert_type = "🚨 **TEST ALERT** 🚨" if is_test else "🔥 **GLITCH DETECTED** 🔥"
+    
     data = {
-        "content": f"🚨 **VERIFICATION ALERT** 🚨\n\n**Subreddit:** r/{subreddit}\n**Item:** {title}\n[Click to View]({link})"
+        "content": f"{alert_type}\n\n**{title}**\n[Click to View Deal]({link})"
     }
     requests.post(WEBHOOK_URL, json=data)
 
-def check_for_glitches():
-    print(f"Checking specific subreddits for 'sale'...")
-    try:
-        response = requests.get(TARGET_URL, headers=HEADERS)
-        response.raise_for_status()
-        posts = response.json()['data']['children']
+def check_slickdeals():
+    print(f"Reading RSS Feed: {RSS_URL}...")
+    feed = feedparser.parse(RSS_URL)
+    
+    print(f"Found {len(feed.entries)} entries.")
+    
+    found_count = 0
+    
+    for i, entry in enumerate(feed.entries):
+        title = entry.title
+        link = entry.link
         
-        for post in posts:
-            post_data = post['data']
-            created_utc = post_data['created_utc']
-            title = post_data['title']
-            subreddit = post_data['subreddit']
-            permalink = f"https://www.reddit.com{post_data['permalink']}"
-            
-            # --- NO TIME FILTER FOR THIS TEST ---
-            # We want to see the last 5 posts no matter what, 
-            # just to prove we are reading the right list.
-            print(f"--> Found post in r/{subreddit}: {title}")
-            send_discord_alert(title, permalink, subreddit)
+        # In RSS, 'published_parsed' is a time struct. We convert to simple time.
+        # Note: Slickdeals RSS sometimes delays timestamps, so we check the last 30 mins.
+        
+        # --- TEST MODE LOGIC ---
+        if TEST_MODE and i < 3:
+            print(f"Sending Test Alert: {title}")
+            send_discord_alert(title, link, is_test=True)
+            found_count += 1
+            continue
 
-        print(f"Test complete.")
+        # --- REAL HUNTING LOGIC ---
+        # 1. Check Keywords
+        if any(keyword in title.lower() for keyword in KEYWORDS):
+            print(f"--> MATCH FOUND: {title}")
+            send_discord_alert(title, link, is_test=False)
+            found_count += 1
+        else:
+            # Optional: Print what it saw just to be sure
+            # print(f"Checked: {title} (No Match)")
+            pass
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    print(f"Scan complete. Alerts sent: {found_count}")
 
 if __name__ == "__main__":
-    check_for_glitches()
+    check_slickdeals()
