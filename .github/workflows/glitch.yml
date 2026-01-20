@@ -3,7 +3,7 @@ name: Glitch Hunter
 on:
   schedule:
     - cron: '*/5 * * * *'  # Runs every 5 minutes
-  workflow_dispatch:      # Allows you to click a button to run it manually
+  workflow_dispatch:      # Manual button
 
 jobs:
   scrape_and_alert:
@@ -26,5 +26,6 @@ jobs:
       - name: Run the scraper script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python glitch.py
+        # THIS IS THE KEY LINE: It matches your filename "agent.py"
+        run: python agent.py
         
