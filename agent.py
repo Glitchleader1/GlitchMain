@@ -1,39 +1,76 @@
-import feedparser
-import os
 import requests
-import google.generativeai as genai
+import os
+import time
+from datetime import datetime, timezone
 
-# Load keys from the Cloud Vault
-GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
+# --- CONFIGURATION ---
+# The URL to search Reddit for "glitch" or "price error" sorted by newest
+# This acts like an RSS feed but in JSON format which is easier for robots to read.
+TARGET_URL = "https://www.reddit.com/search.json?q=glitch+OR+%22price+error%22+OR+misprice&sort=new&limit=10"
 
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Keywords to validate (double check to ensure high quality)
+KEYWORDS = ["glitch", "error", "mistake", "price", "wrong"]
 
-RSS_FEEDS = [
-    "https://www.reddit.com/r/buildapcsales/new/.rss",
-    "https://www.reddit.com/r/gamedeals/new/.rss",
-    "https://www.reddit.com/r/switchdeals/new/.rss"
-]
+# Discord Webhook (loaded from the environment for security)
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-def check_glitch(title):
+# Browser User-Agent (Required so Reddit doesn't block the script)
+HEADERS = {"User-Agent": "GlitchHunter/1.0"}
+
+def send_discord_alert(title, link, price_hint=""):
+    if not WEBHOOK_URL:
+        print("Error: No Discord Webhook URL found.")
+        return
+
+    data = {
+        "content": f"🚨 **GLITCH ALERT** 🚨\n\n**{title}**\n{price_hint}\n[Click to View Deal]({link})"
+    }
+    response = requests.post(WEBHOOK_URL, json=data)
+    if response.status_code == 204:
+        print(f"Sent alert for: {title}")
+    else:
+        print(f"Failed to send alert: {response.status_code}")
+
+def check_for_glitches():
+    print(f"Checking {TARGET_URL}...")
     try:
-        prompt = f"Is '{title}' a 'GLITCH' (price error, 90% off) or 'SALE'? Reply GLITCH or SALE."
-        response = model.generate_content(prompt)
-        return response.text.strip().upper()
-    except:
-        return "ERROR"
+        response = requests.get(TARGET_URL, headers=HEADERS)
+        response.raise_for_status()
+        data = response.json()
+        
+        posts = data['data']['children']
+        
+        # Get the current time to ensure we don't alert on old stuff
+        # (In a simple script, we just check the top 10 results. 
+        # For a pro version, we would save the last seen ID to a file.)
+        
+        found_count = 0
+        
+        for post in posts:
+            post_data = post['data']
+            title = post_data['title']
+            url = post_data['url']
+            permalink = f"https://www.reddit.com{post_data['permalink']}"
+            created_utc = post_data['created_utc']
+            
+            # Check if the post is recent (last 20 minutes)
+            # This prevents reposting old deals every time the script runs
+            post_time = datetime.fromtimestamp(created_utc, timezone.utc)
+            now = datetime.now(timezone.utc)
+            time_diff = (now - post_time).total_seconds() / 60
+            
+            if time_diff <= 20: # Only alert if posted in the last 20 mins
+                 print(f"Found fresh post: {title}")
+                 send_discord_alert(title, permalink)
+                 found_count += 1
+            else:
+                # If we hit old posts, we can stop checking
+                pass 
 
-def send_alert(title, link):
-    data = {"content": f"🚨 **GLITCH:** {title}\n{link}"}
-    requests.post(DISCORD_WEBHOOK, json=data)
+        print(f"Scan complete. Found {found_count} new alerts.")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    print("--- SCANNING ---")
-    for feed in RSS_FEEDS:
-        d = feedparser.parse(feed, agent="Mozilla/5.0")
-        for entry in d.entries[:5]:
-            if any(w in entry.title.lower() for w in ['price error', 'glitch', 'misprice', 'free']):
-                if "GLITCH" in check_glitch(entry.title):
-                    send_alert(entry.title, entry.link)
-                  
+    check_for_glitches()
